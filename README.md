@@ -6,12 +6,47 @@ A multiplayer battle game built with Unity where players engage in epic slapping
 
 Dream Slap is an exciting multiplayer game where players compete in a battle format with a unique twist - instead of traditional weapons, players use slaps to eliminate their opponents. The last player standing wins! Experience fast-paced action, hilarious animations, and competitive gameplay in this unique multiplayer experience.
 
-## Documentation
+## Documentation & Presentation
 
-Due to file size limitations, the detailed documentation and presentation files are not included in this repository. Please contact the developer for access to:
-- Dream Slap.pdf - Full game presentation
-- DreamSlap_documentation.pdf - Technical documentation and implementation details
-- presentation.pdf - Project presentation slides
+The project includes comprehensive documentation and presentation materials:
+
+### Technical Documentation
+The `DreamSlap_documentation.pdf` provides detailed technical insights including:
+- System Architecture
+- Network Implementation
+- Game Mechanics
+- Physics System
+- Character Controllers
+- UI/UX Design
+- Performance Optimization
+- Testing & Debugging
+
+### Project Presentation
+The `presentation.pdf` showcases:
+- Game Overview
+- Core Features
+- Development Process
+- Technical Challenges
+- Future Roadmap
+- Team Structure
+- Development Timeline
+
+Due to file size limitations, these files are not directly included in the repository. Please contact the developer for access.
+
+## Gallery
+
+### Game Screenshots
+![Main Menu](documentation%20and%20presentation/gallery/main_menu.png)
+*Main menu interface with play options*
+
+![Gameplay](documentation%20and%20presentation/gallery/gameplay.png)
+*In-game action showing character combat*
+
+![Character Selection](documentation%20and%20presentation/gallery/character_select.png)
+*Character selection screen with available fighters*
+
+![Arena View](documentation%20and%20presentation/gallery/arena.png)
+*One of the dynamic battle arenas*
 
 ## Features
 

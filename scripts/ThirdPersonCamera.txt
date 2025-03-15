@@ -1,0 +1,136 @@
+using UnityEngine;
+using System.Collections;
+
+public class ThirdPersonCamera : MonoBehaviour
+{
+    [Header("Camera Settings")]
+    public Vector3 offset = new Vector3(0, 1.5f, -2f);
+    public float rotationSpeed = 2.0f;
+    public float minVerticalAngle = -20f;
+    public float maxVerticalAngle = 60f;
+    public float smoothSpeed = 10f;
+    public float defaultTilt = 15f;
+
+    [Header("Debug")]
+    public bool showDebugLogs = true;
+
+    private float yaw = 0f;
+    private float pitch;
+    private Transform target;
+    private Vector3 currentVelocity;
+    private Camera cameraComponent;
+    private bool isInitialized = false;
+
+    void Awake()
+    {
+        
+        cameraComponent = GetComponentInChildren<Camera>();
+        
+        if (cameraComponent == null)
+        {
+            Debug.LogError("No camera found in children of CameraRig!");
+            return;
+        }
+
+        
+        cameraComponent.tag = "MainCamera";
+        cameraComponent.enabled = true;
+        
+        pitch = defaultTilt;
+        isInitialized = true;
+
+        if (showDebugLogs)
+        {
+            Debug.Log($"Camera initialized: {cameraComponent.name}");
+            Debug.Log($"Camera enabled: {cameraComponent.enabled}");
+            Debug.Log($"Camera is active: {cameraComponent.gameObject.activeInHierarchy}");
+        }
+    }
+
+    public void AssignTarget(Transform playerTransform)
+    {
+        if (cameraComponent == null)
+        {
+            Debug.LogError("Camera component is missing!");
+            return;
+        }
+
+        if (playerTransform == null)
+        {
+            Debug.LogError("Player transform is null!");
+            return;
+        }
+
+        target = playerTransform;
+        transform.position = target.position + offset;
+        yaw = transform.eulerAngles.y;
+
+        if (showDebugLogs)
+        {
+            Debug.Log($"Camera target assigned: {target.name}");
+            Debug.Log($"Camera position: {transform.position}");
+        }
+
+        
+        cameraComponent.enabled = true;
+    }
+
+    void LateUpdate()
+    {
+        if (!isInitialized || target == null) return;
+
+        HandleCameraRotation();
+        UpdateCameraPosition();
+    }
+
+    private void HandleCameraRotation()
+    {
+        if (Input.GetMouseButton(1))
+        {
+            yaw += Input.GetAxis("Mouse X") * rotationSpeed;
+            pitch -= Input.GetAxis("Mouse Y") * rotationSpeed;
+            pitch = Mathf.Clamp(pitch, minVerticalAngle, maxVerticalAngle);
+        }
+    }
+
+    private void UpdateCameraPosition()
+    {
+        Quaternion rotation = Quaternion.Euler(pitch, yaw, 0);
+        Vector3 targetPosition = target.position + rotation * offset;
+        
+        transform.position = Vector3.SmoothDamp(
+            transform.position,
+            targetPosition,
+            ref currentVelocity,
+            1f / smoothSpeed
+        );
+
+        transform.LookAt(target.position + Vector3.up * 1f);
+    }
+
+    public void ForceUpdate()
+    {
+        if (target == null || !isInitialized) return;
+
+        transform.position = target.position + offset;
+        transform.LookAt(target.position + Vector3.up * 1f);
+
+        if (showDebugLogs)
+        {
+            Debug.Log($"Force updated camera position: {transform.position}");
+            Debug.Log($"Looking at: {target.position + Vector3.up * 1f}");
+        }
+    }
+
+    void OnEnable()
+    {
+        if (showDebugLogs)
+        {
+            Debug.Log("ThirdPersonCamera enabled");
+            if (cameraComponent != null)
+            {
+                Debug.Log($"Camera component enabled: {cameraComponent.enabled}");
+            }
+        }
+    }
+}
