@@ -1,6 +1,7 @@
 # Documentation files
-*.pdf
-!documentation and presentation/*.pdf
+documentation and presentation/*
+!documentation and presentation/Dream Slap_compressed.pdf
+!documentation and presentation/DreamSlap_documentation.pdf
 
 # Unity generated
 [Ll]ibrary/
