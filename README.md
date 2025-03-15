@@ -8,8 +8,8 @@ Dream Slap is an exciting multiplayer game where players compete in a battle for
 
 ## Documentation
 
-The project documentation is available in the `documentation and presentation` folder:
-- Dream Slap_compressed.pdf - Full game presentation
+Due to file size limitations, the detailed documentation and presentation files are not included in this repository. Please contact the developer for access to:
+- Dream Slap.pdf - Full game presentation
 - DreamSlap_documentation.pdf - Technical documentation and implementation details
 
 ## Features
