@@ -6,6 +6,12 @@ A multiplayer battle game built with Unity where players engage in epic slapping
 
 Dream Slap is an exciting multiplayer game where players compete in a battle format with a unique twist - instead of traditional weapons, players use slaps to eliminate their opponents. The last player standing wins!
 
+## Documentation
+
+Due to file size limitations, the detailed documentation and presentation files are not included in this repository. Please contact the developer for access to:
+- Dream Slap.pdf - Full game presentation
+- DreamSlap_documentation.pdf - Technical documentation and implementation details
+
 ## Features
 
 - Multiplayer battle royale gameplay
