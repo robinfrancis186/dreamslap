@@ -6,6 +6,84 @@ A multiplayer battle game built with Unity where players engage in epic slapping
 
 Dream Slap is an exciting multiplayer game where players compete in a battle format with a unique twist - instead of traditional weapons, players use slaps to eliminate their opponents. The last player standing wins! Experience fast-paced action, hilarious animations, and competitive gameplay in this unique multiplayer experience.
 
+## Pipeline Architecture
+
+```mermaid
+graph TD
+    A[Player Input] --> B[Input Manager]
+    B --> C[Player Controller]
+    
+    subgraph Game Core
+        C --> D[Physics System]
+        D --> E[Combat Manager]
+        E --> F[Player State]
+        F --> G[Animation Controller]
+    end
+    
+    subgraph Networking
+        H[Photon Network Manager] --> I[Room Management]
+        I --> J[Player Synchronization]
+        J --> K[State Replication]
+    end
+    
+    subgraph Game Systems
+        L[UI Manager] --> M[HUD]
+        L --> N[Menu System]
+        O[Sound Manager] --> P[SFX]
+        O --> Q[BGM]
+        R[Scene Manager] --> S[Level Loading]
+        R --> T[Asset Management]
+    end
+    
+    C <--> H
+    F <--> K
+    C --> L
+    E --> O
+    B --> R
+```
+
+### Core Components
+
+1. **Input Pipeline**
+   - Player Input Detection
+   - Input Validation
+   - Command Processing
+
+2. **Game Core**
+   - Physics-based Movement
+   - Combat System
+   - State Management
+   - Animation Control
+
+3. **Networking Layer**
+   - Player Connection Management
+   - Room/Session Handling
+   - State Synchronization
+   - Latency Compensation
+
+4. **Game Systems**
+   - User Interface Management
+   - Audio System
+   - Scene/Level Management
+   - Resource Management
+
+### Data Flow
+
+1. **Player Interaction Flow**
+   ```
+   Input → Validation → Command → Physics → State Update → Animation → Render
+   ```
+
+2. **Network Synchronization**
+   ```
+   Local State → Serialization → Network Transfer → Deserialization → Remote State Update
+   ```
+
+3. **Game State Management**
+   ```
+   Game Event → State Change → Network Sync → UI Update → Audio Response
+   ```
+
 ## Documentation & Presentation
 
 The project includes comprehensive documentation and presentation materials:
