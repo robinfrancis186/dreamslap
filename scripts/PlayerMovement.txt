@@ -1,0 +1,608 @@
+using UnityEngine;
+using Photon.Pun;
+using Photon.Realtime;
+using System.Collections;
+using TMPro;
+
+public class PlayerMovement : MonoBehaviourPunCallbacks, IPunObservable
+{
+    [Header("Movement Settings")]
+    public float moveSpeed = 5f;
+    public float turnSmoothTime = 0.1f;
+    public float playerHeight = 356f;
+
+    [Header("Ground & Gravity Settings")]
+    public float gravity = -19.62f;
+    public float groundCheckRadius = 0.2f;
+    public LayerMask groundMask;
+    private Vector3 verticalVelocity;
+    private bool isGrounded;
+    private float groundedOffset = 0.14f;
+    private float terminalVelocity = -20f;
+
+    [Header("Combat Settings")]
+    public float slapDamage = 10f;
+    public float comboTimeWindow = 1.5f;
+    public float comboMultiplier = 1.5f;
+    public float maxBlockDuration = 3f;
+
+    [Header("Combat Timing")]
+    public float slapHitboxDelay = 0.2f;    
+    public float slapHitboxDuration = 0.5f;  
+
+    [Header("Effects")]
+    public GameObject hitEffectPrefab;
+    public GameObject blockEffectPrefab;
+    public AudioClip normalSlapSound;
+    public AudioClip comboSound;
+    public AudioClip blockSound;
+
+    [Header("UI")]  
+    public TMP_Text slapCountText;
+    private int totalSlaps = 0;
+
+    [Header("Invisibility")]
+    private bool isInvisible = false;
+    private float invisibilityEndTime = 0f;
+    public GameObject playerModel;
+
+    [Header("Death & Spectator")]
+    private bool isDead = false;
+    private bool isSpectating = false;
+    private GameManager gameManager;
+
+    
+    private CharacterController controller;
+    private PhotonView photonView;
+    private Animator animator;
+    private Camera playerCamera;
+    private AudioSource audioSource;
+    private CrowdAudio crowdAudio;
+    private SlapHitDetector slapHitDetector;
+
+   
+    private float turnSmoothVelocity;
+    private Vector3 originalPosition;
+    private bool canMove = true;
+    private bool isSprinting = false;
+
+
+    private Vector3 networkPosition;
+    private Quaternion networkRotation;
+    private float lastNetworkPositionUpdate;
+    private const float NETWORK_SMOOTH_TIME = 0.1f;
+    private Vector3 velocity;
+
+       private bool isSlapping = false;
+    [HideInInspector] public bool isSlapActive = false;
+    private bool isDucking = false;
+    private bool isBlocking = false;
+    private bool isAnimationPlaying = false;
+    private int comboCount = 0;
+    private float lastSlapTime;
+    private float blockStartTime;
+        void Start()
+    {
+        InitializeComponents();
+        
+        if (!photonView.IsMine)
+        {
+            networkPosition = transform.position;
+            networkRotation = transform.rotation;
+            return;
+        }
+    }
+
+    void InitializeComponents()
+    {
+        controller = GetComponent<CharacterController>();
+        photonView = GetComponent<PhotonView>();
+        animator = GetComponent<Animator>();
+        audioSource = gameObject.AddComponent<AudioSource>();
+        crowdAudio = FindObjectOfType<CrowdAudio>();
+        slapHitDetector = GetComponentInChildren<SlapHitDetector>();
+
+        gameManager = FindObjectOfType<GameManager>();
+     if (gameManager == null)
+    {
+        Debug.LogError("GameManager not found in scene! Please add GameManager to the scene.");
+    }
+    originalPosition = transform.position;
+    }
+
+    void Update()
+    {
+        if (!photonView.IsMine)
+        {
+            SmoothRemotePosition();
+            return;
+        }
+
+        if (isDead || isSpectating) return;
+
+        if (playerCamera == null)
+            playerCamera = Camera.main;
+
+        CheckGround();
+        HandleGravity();
+        HandleMovement();
+        HandleCombat();
+        UpdateComboTimer();
+        CheckBlockDuration();
+
+        if (isInvisible && Time.time > invisibilityEndTime)
+        {
+            photonView.RPC("DeactivateInvisibility", RpcTarget.All);
+        }
+    }
+
+    void CheckGround()
+    {
+        isGrounded = Physics.SphereCast(
+            transform.position + Vector3.up,
+            groundCheckRadius,
+            Vector3.down,
+            out RaycastHit hit,
+            groundedOffset,
+            groundMask
+        );
+
+        if (isGrounded && verticalVelocity.y < 0)
+        {
+            verticalVelocity.y = -2f;
+        }
+    }
+
+    void HandleGravity()
+    {
+        if (!isGrounded)
+        {
+            verticalVelocity.y += gravity * Time.deltaTime;
+            verticalVelocity.y = Mathf.Max(verticalVelocity.y, terminalVelocity);
+        }
+
+        controller.Move(verticalVelocity * Time.deltaTime);
+    }
+
+void HandleMovement()
+{
+    if (isSlapping || isDucking || isAnimationPlaying || isBlocking) return;
+
+    float horizontal = Input.GetAxisRaw("Horizontal");
+    float vertical = Input.GetAxisRaw("Vertical");
+    Vector3 direction = new Vector3(horizontal, 0f, vertical).normalized;
+
+    bool isMoving = direction.magnitude >= 0.1f;
+    isSprinting = Input.GetKey(KeyCode.LeftShift) && canMove && isMoving;
+
+    animator.SetBool("isRunning", isMoving);
+    animator.SetBool("isSprinting", isSprinting);
+
+    if (isMoving && canMove)
+    {
+        float speed = isSprinting ? moveSpeed * 1.5f : moveSpeed;
+        ProcessMovement(direction, speed);
+    }
+}
+
+void ProcessMovement(Vector3 direction, float speed)
+{
+    float targetAngle = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg + 
+                       playerCamera.transform.eulerAngles.y;
+    
+    float angle = Mathf.SmoothDampAngle(transform.eulerAngles.y, targetAngle, 
+                                       ref turnSmoothVelocity, turnSmoothTime);
+    
+    transform.rotation = Quaternion.Euler(0f, angle, 0f);
+
+    Vector3 moveDir = Quaternion.Euler(0f, targetAngle, 0f) * Vector3.forward;
+    Vector3 movement = moveDir.normalized * speed * Time.deltaTime;
+    movement.y = 0;
+    controller.Move(movement);
+}
+  void HandleCombat()
+{
+    
+    if (isBlocking) return;
+
+    if (Input.GetMouseButtonDown(0))
+    {
+       
+        StopCurrentAnimation();
+        photonView.RPC("PlaySlapAnimation", RpcTarget.All);
+    }
+
+    if (Input.GetKeyDown(KeyCode.C))
+    {
+        StopCurrentAnimation();
+        photonView.RPC("PlayDuckAnimation", RpcTarget.All);
+    }
+
+    if (Input.GetKeyDown(KeyCode.Space))
+    {
+        StopCurrentAnimation();
+        photonView.RPC("PlayBlockAnimation", RpcTarget.All);
+    }
+    else if (Input.GetKeyUp(KeyCode.Space) && isBlocking)
+    {
+        StopBlocking();
+    }
+}
+private void StopCurrentAnimation()
+    {
+        
+        isSlapping = false;
+        isDucking = false;
+        isAnimationPlaying = false;
+        
+      
+        animator.ResetTrigger("Slap");
+        animator.ResetTrigger("Duck");
+        animator.ResetTrigger("Block");
+
+       
+        foreach (var layer in animator.parameters)
+        {
+            if (layer.type == AnimatorControllerParameterType.Trigger)
+            {
+                animator.SetTrigger(layer.name);
+                animator.ResetTrigger(layer.name);
+            }
+        }
+    }
+
+
+[PunRPC]
+void PlaySlapAnimation()
+{
+    StopCurrentAnimation();
+    isAnimationPlaying = true;
+    isSlapping = true;
+    
+    if (photonView.IsMine)
+    {
+        StartCoroutine(ControlSlapHitbox());
+    }
+    
+    
+    animator.SetTrigger("Slap");
+}
+
+    IEnumerator ControlSlapHitbox()
+    {
+        yield return new WaitForSeconds(slapHitboxDelay);
+        
+        if (slapHitDetector != null)
+        {
+            isSlapActive = true;
+            slapHitDetector.EnableHitBox();
+        }
+        
+        yield return new WaitForSeconds(slapHitboxDuration);
+        
+        if (slapHitDetector != null)
+        {
+            isSlapActive = false;
+            slapHitDetector.DisableHitBox();
+        }
+        
+        yield return new WaitForSeconds(0.1f);
+        
+        isSlapping = false;
+        isAnimationPlaying = false;
+    }
+
+[PunRPC]
+void PlayDuckAnimation()
+{
+    StopCurrentAnimation();
+    isDucking = true;
+   
+    animator.SetTrigger("Duck");
+    StartCoroutine(ResetDuckState());
+}
+    IEnumerator ResetDuckState()
+    {
+        yield return new WaitForSeconds(0.5f);
+        isDucking = false;
+    }
+[PunRPC]
+void PlayBlockAnimation()
+{
+    StopCurrentAnimation();
+    isBlocking = true;
+    blockStartTime = Time.time;
+  
+    animator.SetTrigger("Block");
+    if (blockSound != null && audioSource != null)
+    {
+        audioSource.PlayOneShot(blockSound);
+    }
+}
+    private void StopBlocking()
+    {
+        isBlocking = false;
+        animator.SetTrigger("StopBlock");
+    }
+        void CheckBlockDuration()
+    {
+        if (isBlocking && Time.time - blockStartTime >= maxBlockDuration)
+        {
+            StopBlocking();
+        }
+    }
+
+    private void UpdateCombo()
+    {
+        float timeSinceLastSlap = Time.time - lastSlapTime;
+        if (timeSinceLastSlap <= comboTimeWindow)
+        {
+            comboCount++;
+            if (comboCount > 3) comboCount = 3;
+            slapDamage = 10f * (1f + (comboCount - 1) * comboMultiplier);
+        }
+        else
+        {
+            comboCount = 1;
+            slapDamage = 10f;
+        }
+        lastSlapTime = Time.time;
+    }
+
+    void UpdateComboTimer()
+    {
+        if (Time.time - lastSlapTime > comboTimeWindow)
+        {
+            comboCount = 0;
+        }
+    }
+
+    void SmoothRemotePosition()
+    {
+        transform.position = Vector3.SmoothDamp(transform.position, networkPosition, 
+                                              ref velocity, NETWORK_SMOOTH_TIME);
+        transform.rotation = Quaternion.Lerp(transform.rotation, networkRotation, 
+                                           Time.deltaTime * 10f);
+    }
+
+    [PunRPC]
+    void SpawnHitEffect(Vector3 hitPoint)
+    {
+        if (hitEffectPrefab != null)
+        {
+            GameObject effectObj = Instantiate(hitEffectPrefab, hitPoint, Quaternion.identity);
+            ParticleManager particleManager = effectObj.GetComponent<ParticleManager>();
+            
+            if (particleManager != null)
+            {
+                particleManager.PlayHitEffect(comboCount);
+            }
+
+            if (photonView.IsMine)
+            {
+                PlayHitSound(comboCount);
+            }
+        }
+    }
+
+    void PlayHitSound(int comboCount)
+    {
+        if (audioSource == null) return;
+
+        switch(comboCount)
+        {
+            case 1:
+                if (normalSlapSound != null)
+                    audioSource.PlayOneShot(normalSlapSound);
+                break;
+            case 2:
+            case 3:
+                if (comboSound != null)
+                    audioSource.PlayOneShot(comboSound, comboCount == 3 ? 1.5f : 1.2f);
+                break;
+        }
+    }
+
+    [PunRPC]
+    public void ActivateInvisibility(float duration)
+    {
+        isInvisible = true;
+        invisibilityEndTime = Time.time + duration;
+
+        if (!photonView.IsMine)
+        {
+            playerModel.SetActive(false);
+        }
+        
+        if (photonView.IsMine)
+        {
+            Debug.Log($"You are now invisible for {duration} seconds!");
+        }
+    }
+
+    [PunRPC]
+    public void DeactivateInvisibility()
+    {
+        isInvisible = false;
+        playerModel.SetActive(true);
+        
+        if (photonView.IsMine)
+        {
+            Debug.Log("You are no longer invisible!");
+        }
+    }
+        public bool IsBlocking()
+    {
+        return isBlocking;
+    }
+
+    public void SetCanMove(bool can)
+    {
+        canMove = can;
+        if (!canMove)
+        {
+            isSprinting = false;
+        }
+    }
+
+    public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
+    {
+        if (stream.IsWriting)
+        {
+            stream.SendNext(transform.position);
+            stream.SendNext(transform.rotation);
+            stream.SendNext(isSlapping);
+            stream.SendNext(isDucking);
+            stream.SendNext(comboCount);
+            stream.SendNext(isBlocking);
+            stream.SendNext(isInvisible);
+            stream.SendNext(isDead);        
+            stream.SendNext(isSpectating);  
+        }
+        else
+        {
+            networkPosition = (Vector3)stream.ReceiveNext();
+            networkRotation = (Quaternion)stream.ReceiveNext();
+            lastNetworkPositionUpdate = Time.time;
+            isSlapping = (bool)stream.ReceiveNext();
+            isDucking = (bool)stream.ReceiveNext();
+            comboCount = (int)stream.ReceiveNext();
+            isBlocking = (bool)stream.ReceiveNext();
+            isInvisible = (bool)stream.ReceiveNext();
+            isDead = (bool)stream.ReceiveNext();        
+            isSpectating = (bool)stream.ReceiveNext();  
+        }
+    }
+
+    void OnDrawGizmos()
+    {
+        Gizmos.color = Color.red;
+        Gizmos.DrawWireSphere(transform.position + Vector3.up, groundCheckRadius);
+        Gizmos.DrawLine(transform.position + Vector3.up, 
+                       transform.position + Vector3.up + Vector3.down * groundedOffset);
+    }
+
+  
+    public void OnDeath()
+{
+    if (!photonView.IsMine) return;
+    photonView.RPC("RPCHandleDeath", RpcTarget.All);
+}
+
+[PunRPC]
+private void RPCHandleDeath()
+{
+    isDead = true;
+    
+ 
+    if (animator != null)
+    {
+        animator.SetTrigger("Die");
+    }
+
+   
+    if (controller != null)
+    {
+        controller.enabled = false;
+    }
+
+   
+    Collider[] colliders = GetComponents<Collider>();
+    foreach (Collider col in colliders)
+    {
+        col.enabled = false;
+    }
+
+
+    isSlapping = false;
+    isSlapActive = false;
+    isDucking = false;
+    isBlocking = false;
+    isAnimationPlaying = false;
+
+   
+    if (slapHitDetector != null)
+    {
+        slapHitDetector.DisableHitBox();
+    }
+
+    if (photonView.IsMine)
+    {
+       
+        if (gameManager != null)
+        {
+            gameManager.OnPlayerEliminated(PhotonNetwork.LocalPlayer.NickName);
+        }
+        else
+        {
+            Debug.LogError("GameManager not found! Make sure it exists in the scene.");
+        }
+
+        canMove = false;
+    }
+}
+public void SetPlayerCamera(Camera cam)
+{
+    if (photonView.IsMine)
+    {
+        playerCamera = cam;
+        Debug.Log($"Camera {(cam != null ? cam.name : "null")} assigned to player {gameObject.name}");
+    }
+}
+    public void EnableSpectatorMode()
+    {
+        if (!photonView.IsMine) return;
+
+        isSpectating = true;
+        canMove = false;
+
+       
+        if (playerModel != null)
+        {
+            Renderer[] renderers = playerModel.GetComponentsInChildren<Renderer>();
+            foreach (Renderer r in renderers)
+            {
+                Color c = r.material.color;
+                c.a = 0.5f;
+                r.material.color = c;
+            }
+        }
+
+  
+        if (slapHitDetector != null)
+        {
+            slapHitDetector.gameObject.SetActive(false);
+        }
+    }
+
+    public void DisableSpectatorMode()
+    {
+        if (!photonView.IsMine) return;
+
+        isSpectating = false;
+        
+        
+        if (!isDead)
+        {
+            canMove = true;
+        }
+
+       
+        if (playerModel != null)
+        {
+            Renderer[] renderers = playerModel.GetComponentsInChildren<Renderer>();
+            foreach (Renderer r in renderers)
+            {
+                Color c = r.material.color;
+                c.a = 1f;
+                r.material.color = c;
+            }
+        }
+
+        
+        if (!isDead && slapHitDetector != null)
+        {
+            slapHitDetector.gameObject.SetActive(true);
+        }
+    }
+}

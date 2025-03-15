@@ -1,0 +1,129 @@
+using UnityEngine;
+using Photon.Pun;
+using Photon.Realtime;
+
+public class PlayerSpawner : MonoBehaviourPunCallbacks
+{
+    [Header("Player Settings")]
+    public GameObject playerPrefab;
+    public Transform[] spawnPoints;
+    public bool randomizeSpawnPoints = true;
+
+    [Header("Camera Settings")]
+    public ThirdPersonCamera thirdPersonCamera;
+    public Camera mainCamera;  
+
+    [Header("Debug")]
+    public bool showDebugLogs = true;
+
+    private GameObject localPlayer;
+    private bool hasSpawned = false;
+
+    void Start()
+    {
+        if (showDebugLogs) Debug.Log("PlayerSpawner Start");
+        
+        if (spawnPoints == null || spawnPoints.Length == 0)
+        {
+            Debug.LogError("No spawn points assigned!");
+            return;
+        }
+
+        
+        if (mainCamera == null)
+        {
+            mainCamera = Camera.main;
+            if (mainCamera == null)
+            {
+                Debug.LogError("No main camera found in scene!");
+            }
+        }
+
+        SpawnPlayerMultiplayer();
+    }
+
+    void SpawnPlayerMultiplayer()
+    {
+        if (hasSpawned || playerPrefab == null) return;
+
+        if (showDebugLogs) Debug.Log("Attempting multiplayer spawn");
+
+     
+        int spawnIndex = (PhotonNetwork.LocalPlayer.ActorNumber - 1) % spawnPoints.Length;
+        Transform spawnPoint = spawnPoints[spawnIndex];
+
+        GameObject player = PhotonNetwork.Instantiate(playerPrefab.name, spawnPoint.position, spawnPoint.rotation);
+        
+        if (player != null && player.GetComponent<PhotonView>().IsMine)
+        {
+            SetupLocalPlayer(player);
+            hasSpawned = true;
+            if (showDebugLogs) Debug.Log("Multiplayer player spawned successfully");
+        }
+    }
+
+    private void SetupLocalPlayer(GameObject player)
+    {
+        if (player == null)
+        {
+            Debug.LogError("Player object is null in SetupLocalPlayer!");
+            return;
+        }
+
+        if (showDebugLogs) Debug.Log("Setting up local player...");
+
+   
+        player.tag = "Player";
+        localPlayer = player;
+
+       
+        if (thirdPersonCamera != null)
+        {
+            thirdPersonCamera.gameObject.SetActive(true);
+            thirdPersonCamera.AssignTarget(player.transform);
+            if (showDebugLogs) Debug.Log("Camera setup completed");
+        }
+        else
+        {
+            Debug.LogError("ThirdPersonCamera is null!");
+        }
+
+       
+        PlayerMovement movement = player.GetComponent<PlayerMovement>();
+        if (movement != null)
+        {
+           
+            if (mainCamera != null)
+            {
+                movement.SetPlayerCamera(mainCamera);
+                if (showDebugLogs) Debug.Log("Camera assigned to PlayerMovement");
+            }
+            else
+            {
+                Debug.LogError("Main Camera is null!");
+            }
+
+            
+            movement.SetCanMove(true);
+            if (showDebugLogs) Debug.Log("PlayerMovement enabled");
+        }
+
+        
+        CharacterController controller = player.GetComponent<CharacterController>();
+        if (controller != null)
+        {
+            controller.enabled = true;
+            if (showDebugLogs) Debug.Log("CharacterController enabled");
+        }
+    }
+
+    public override void OnPlayerEnteredRoom(Player newPlayer)
+    {
+        if (showDebugLogs) Debug.Log($"Player {newPlayer.NickName} joined the room");
+    }
+
+    public override void OnPlayerLeftRoom(Player otherPlayer)
+    {
+        if (showDebugLogs) Debug.Log($"Player {otherPlayer.NickName} left the room");
+    }
+}

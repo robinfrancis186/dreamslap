@@ -1,0 +1,152 @@
+using Photon.Pun;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using System.Collections;
+using Photon.Realtime;
+
+public class NetworkManager : MonoBehaviourPunCallbacks
+{
+    public static NetworkManager Instance;
+    private bool isReconnecting = false;
+    private string lastRoomName;
+    private int reconnectAttempts = 0;
+    private const int MAX_RECONNECT_ATTEMPTS = 3;
+
+    private void Awake()
+    {
+        if (Instance == null)
+        {
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+        else
+        {
+            Destroy(gameObject);
+        }
+    }
+
+    void Start()
+    {
+        Debug.Log("[NETWORK] NetworkManager Start");
+        PhotonNetwork.AutomaticallySyncScene = true;
+        ConnectToServer();
+    }
+
+    private void ConnectToServer()
+    {
+        if (!PhotonNetwork.IsConnected)
+        {
+            PhotonNetwork.ConnectUsingSettings();
+            Debug.Log("[NETWORK] Connecting to server...");
+        }
+    }
+
+    public override void OnConnectedToMaster()
+    {
+        Debug.Log("[NETWORK] Connected to Master!");
+        isReconnecting = false;
+        reconnectAttempts = 0;
+
+        
+        if (!string.IsNullOrEmpty(lastRoomName))
+        {
+            PhotonNetwork.JoinRoom(lastRoomName);
+        }
+        else
+        {
+            PhotonNetwork.JoinLobby();
+        }
+    }
+
+    public override void OnJoinedRoom()
+    {
+        Debug.Log("[NETWORK] Joined Room: " + PhotonNetwork.CurrentRoom.Name);
+        lastRoomName = PhotonNetwork.CurrentRoom.Name;
+    }
+
+    public override void OnDisconnected(DisconnectCause cause)
+    {
+        Debug.LogError($"[NETWORK] Disconnected: {cause}");
+        
+        if (!isReconnecting && reconnectAttempts < MAX_RECONNECT_ATTEMPTS)
+        {
+            StartCoroutine(ReconnectSequence());
+        }
+        else if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS)
+        {
+            Debug.Log("[NETWORK] Max reconnection attempts reached. Returning to menu.");
+            ReturnToMenu();
+        }
+    }
+
+    private IEnumerator ReconnectSequence()
+    {
+        isReconnecting = true;
+        reconnectAttempts++;
+        
+        Debug.Log($"[NETWORK] Reconnection attempt {reconnectAttempts}/{MAX_RECONNECT_ATTEMPTS}");
+
+        yield return new WaitForSeconds(1f);
+
+        if (PhotonNetwork.IsConnected)
+        {
+            if (!string.IsNullOrEmpty(lastRoomName))
+            {
+                PhotonNetwork.JoinRoom(lastRoomName);
+            }
+        }
+        else
+        {
+            PhotonNetwork.ConnectUsingSettings();
+        }
+
+      
+        yield return new WaitForSeconds(5f);
+        
+        if (!PhotonNetwork.IsConnected)
+        {
+            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS)
+            {
+                StartCoroutine(ReconnectSequence());
+            }
+            else
+            {
+                Debug.Log("[NETWORK] Failed to reconnect after multiple attempts");
+                ReturnToMenu();
+            }
+        }
+    }
+
+    private void ReturnToMenu()
+    {
+        isReconnecting = false;
+        lastRoomName = null;
+        reconnectAttempts = 0;
+        SceneManager.LoadScene(0);
+    }
+
+    public override void OnJoinRoomFailed(short returnCode, string message)
+    {
+        Debug.Log($"[NETWORK] Failed to join room: {message}");
+        lastRoomName = null;
+        PhotonNetwork.JoinLobby();
+    }
+
+    private void OnApplicationPause(bool pause)
+    {
+        if (!pause && !PhotonNetwork.IsConnected && !isReconnecting)
+        {
+            ConnectToServer();
+        }
+    }
+
+  
+    public void ForceReconnect()
+    {
+        if (!isReconnecting)
+        {
+            reconnectAttempts = 0;
+            StartCoroutine(ReconnectSequence());
+        }
+    }
+}

@@ -1,0 +1,504 @@
+using UnityEngine;
+using Photon.Pun;
+using Photon.Realtime;
+using TMPro;
+using UnityEngine.UI;
+using DG.Tweening;
+using System.Collections;
+
+public class MultiplayerManager : MonoBehaviourPunCallbacks
+{
+    [Header("UI Panels")]
+    public GameObject multiplayerPanel;
+    public GameObject waitingLobbyPanel;
+    public GameObject connectionStatusPanel;
+    public GameObject errorPanel;
+    public GameObject loadingPanel;
+
+    [Header("UI Text Elements")]
+    public TMP_InputField roomCodeInput;
+    public TMP_Text roomCodeDisplay;
+    public TMP_Text playerListText;
+    public TMP_Text connectionStatusText;
+    public TMP_Text errorText;
+    public TMP_Text loadingText;
+
+    [Header("UI Buttons")]
+    public Button createRoomButton;
+    public Button joinRoomButton;
+    public Button backButton;
+    public Button waitingLobbyBackButton;
+    public Button startGameButton;
+    public Button retryConnectionButton;
+
+    [Header("UI Visual Elements")]
+    public Image connectionStatusIcon;
+    public Image loadingSpinner;
+
+    [Header("Connection Settings")]
+    public float reconnectDelay = 2f;
+    public int maxReconnectAttempts = 3;
+    public float connectionTimeout = 10f;
+    public float keepAliveInterval = 3f;
+
+    [Header("References")]
+    public MainMenu mainMenu;
+
+    
+    private const int MAX_PLAYERS = 4;
+    private const int MIN_PLAYERS = 2;
+    private const string GAME_SCENE_NAME = "GameScene";
+    private const string NICKNAME_KEY = "PlayerNickname";
+
+  
+    private int reconnectAttempts = 0;
+    private bool isReconnecting = false;
+    private Room currentRoom;
+    private Coroutine connectionTimeoutCoroutine;
+    private Coroutine keepAliveCoroutine;
+    private Coroutine loadingSpinnerCoroutine;
+
+    private void Start()
+    {
+        InitializeComponents();
+        SetupButtons();
+        SetupPhotonSettings();
+        StartConnectionMonitoring();
+        SetInitialUIState();
+    }
+
+    private void InitializeComponents()
+    {
+        if (mainMenu == null) mainMenu = FindObjectOfType<MainMenu>();
+        SetupNickname();
+    }
+
+    private void SetupNickname()
+    {
+        string savedNickname = PlayerPrefs.GetString(NICKNAME_KEY, "");
+        if (string.IsNullOrEmpty(savedNickname))
+        {
+            savedNickname = "Player" + Random.Range(1000, 9999);
+            PlayerPrefs.SetString(NICKNAME_KEY, savedNickname);
+        }
+        PhotonNetwork.NickName = savedNickname;
+    }
+
+   private void SetupPhotonSettings()
+{
+   
+    PhotonNetwork.AutomaticallySyncScene = true;
+    PhotonNetwork.EnableCloseConnection = true;
+    
+    
+    PhotonNetwork.NetworkingClient.LoadBalancingPeer.DebugOut = ExitGames.Client.Photon.DebugLevel.ALL;
+    
+  
+    PhotonNetwork.NetworkingClient.LoadBalancingPeer.DisconnectTimeout = 10000; 
+    PhotonNetwork.NetworkingClient.LoadBalancingPeer.TimePingInterval = 3000;
+    
+
+    PhotonNetwork.KeepAliveInBackground = 3000; 
+}
+    private void StartConnectionMonitoring()
+    {
+        if (keepAliveCoroutine != null) StopCoroutine(keepAliveCoroutine);
+        keepAliveCoroutine = StartCoroutine(ConnectionMonitor());
+    }
+
+    private IEnumerator ConnectionMonitor()
+    {
+        WaitForSeconds wait = new WaitForSeconds(keepAliveInterval);
+        while (true)
+        {
+            yield return wait;
+            
+            if (PhotonNetwork.IsConnected)
+            {
+                if (PhotonNetwork.InRoom)
+                {
+                    PhotonNetwork.NetworkingClient.Service();
+                }
+            }
+            else if (!isReconnecting)
+            {
+                HandleReconnection();
+            }
+
+            UpdateConnectionStatus(GetConnectionStatus());
+        }
+    }
+
+    private string GetConnectionStatus()
+    {
+        if (PhotonNetwork.IsConnected)
+        {
+            if (PhotonNetwork.InRoom)
+                return $"In Room: {PhotonNetwork.CurrentRoom.Name}";
+            else if (PhotonNetwork.InLobby)
+                return "In Lobby";
+            else
+                return "Connected to Server";
+        }
+        else if (isReconnecting)
+        {
+            return $"Reconnecting... Attempt {reconnectAttempts}/{maxReconnectAttempts}";
+        }
+        else
+        {
+            return "Disconnected";
+        }
+    }
+
+    private void SetupButtons()
+    {
+        if (createRoomButton != null)
+            createRoomButton.onClick.AddListener(CreateRoom);
+
+        if (joinRoomButton != null)
+            joinRoomButton.onClick.AddListener(JoinRoom);
+
+        if (backButton != null)
+            backButton.onClick.AddListener(OnBackButtonClick);
+
+        if (waitingLobbyBackButton != null)
+            waitingLobbyBackButton.onClick.AddListener(OnWaitingLobbyBackClick);
+
+        if (startGameButton != null)
+        {
+            startGameButton.onClick.AddListener(StartGame);
+            startGameButton.gameObject.SetActive(false);
+        }
+
+        if (retryConnectionButton != null)
+            retryConnectionButton.onClick.AddListener(RetryConnection);
+    }
+
+    public void CreateRoom()
+    {
+        if (!PhotonNetwork.IsConnected)
+        {
+            ShowError("Not connected to server. Please wait...");
+            return;
+        }
+
+        string roomCode = Random.Range(1000, 9999).ToString();
+        RoomOptions options = new RoomOptions
+        {
+            MaxPlayers = MAX_PLAYERS,
+            IsVisible = true,
+            IsOpen = true
+        };
+
+        ShowLoadingPanel("Creating room...");
+        PhotonNetwork.CreateRoom(roomCode, options);
+    }
+
+    public void JoinRoom()
+    {
+        if (string.IsNullOrEmpty(roomCodeInput.text))
+        {
+            ShowError("Please enter a room code!");
+            return;
+        }
+
+        if (!PhotonNetwork.IsConnected)
+        {
+            ShowError("Not connected to server. Please wait...");
+            return;
+        }
+
+        ShowLoadingPanel("Joining room...");
+        PhotonNetwork.JoinRoom(roomCodeInput.text);
+    }
+
+    public void StartGame()
+    {
+        if (PhotonNetwork.IsMasterClient)
+        {
+            if (PhotonNetwork.CurrentRoom.PlayerCount >= MIN_PLAYERS)
+            {
+                PhotonNetwork.CurrentRoom.IsOpen = false;
+                PhotonNetwork.LoadLevel(GAME_SCENE_NAME);
+            }
+            else
+            {
+                ShowError($"Need at least {MIN_PLAYERS} players to start!");
+            }
+        }
+    }
+
+    public void RetryConnection()
+    {
+        if (!PhotonNetwork.IsConnected && !isReconnecting)
+        {
+            reconnectAttempts = 0;
+            HandleReconnection();
+        }
+    }
+
+    private void HandleReconnection()
+    {
+        if (isReconnecting || reconnectAttempts >= maxReconnectAttempts)
+        {
+            if (reconnectAttempts >= maxReconnectAttempts)
+            {
+                ShowError("Connection lost. Please check your internet connection.");
+                UpdateConnectionStatus("Connection Failed");
+                isReconnecting = false;
+                return;
+            }
+            return;
+        }
+
+        isReconnecting = true;
+        reconnectAttempts++;
+        UpdateConnectionStatus($"Reconnecting... Attempt {reconnectAttempts}/{maxReconnectAttempts}");
+        ShowLoadingPanel("Reconnecting to server...");
+
+        StartCoroutine(ReconnectionAttempt());
+    }
+
+    private IEnumerator ReconnectionAttempt()
+    {
+        float currentDelay = reconnectDelay * Mathf.Pow(2, reconnectAttempts - 1);
+        yield return new WaitForSeconds(currentDelay);
+
+        if (!PhotonNetwork.IsConnected)
+        {
+            try
+            {
+                PhotonNetwork.ConnectUsingSettings();
+                if (connectionTimeoutCoroutine != null) StopCoroutine(connectionTimeoutCoroutine);
+                connectionTimeoutCoroutine = StartCoroutine(ConnectionTimeout());
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"Connection attempt failed: {e.Message}");
+                isReconnecting = false;
+                ShowError("Failed to connect to server");
+            }
+        }
+    }
+
+    private IEnumerator ConnectionTimeout()
+    {
+        yield return new WaitForSeconds(connectionTimeout);
+        if (!PhotonNetwork.IsConnected)
+        {
+            isReconnecting = false;
+            ShowError("Connection timeout. Please check your internet connection.");
+            UpdateConnectionStatus("Connection Failed");
+        }
+    }
+
+    private void UpdateConnectionStatus(string status)
+    {
+        if (connectionStatusPanel != null && connectionStatusText != null)
+        {
+            connectionStatusPanel.SetActive(true);
+            connectionStatusText.text = status;
+            
+            if (connectionStatusIcon != null)
+            {
+                connectionStatusIcon.color = PhotonNetwork.IsConnected ? Color.green : Color.red;
+            }
+        }
+    }
+
+    private void ShowLoadingPanel(string message)
+    {
+        if (loadingPanel != null)
+        {
+            loadingPanel.SetActive(true);
+            if (loadingText != null)
+            {
+                loadingText.text = message;
+            }
+            StartLoadingSpinner();
+        }
+    }
+
+    private void HideLoadingPanel()
+    {
+        if (loadingPanel != null)
+        {
+            loadingPanel.SetActive(false);
+            StopLoadingSpinner();
+        }
+    }
+
+    private void StartLoadingSpinner()
+    {
+        if (loadingSpinner != null && loadingSpinnerCoroutine == null)
+        {
+            loadingSpinnerCoroutine = StartCoroutine(AnimateLoadingSpinner());
+        }
+    }
+
+    private void StopLoadingSpinner()
+    {
+        if (loadingSpinnerCoroutine != null)
+        {
+            StopCoroutine(loadingSpinnerCoroutine);
+            loadingSpinnerCoroutine = null;
+        }
+    }
+
+    private IEnumerator AnimateLoadingSpinner()
+    {
+        while (true)
+        {
+            loadingSpinner.transform.Rotate(0, 0, -360 * Time.deltaTime);
+            yield return null;
+        }
+    }
+
+    private void ShowError(string message)
+    {
+        if (errorPanel != null && errorText != null)
+        {
+            errorPanel.SetActive(true);
+            errorText.text = message;
+            CancelInvoke(nameof(HideError));
+            Invoke(nameof(HideError), 3f);
+        }
+        Debug.LogWarning(message);
+    }
+
+    private void HideError()
+    {
+        if (errorPanel != null)
+        {
+            errorPanel.SetActive(false);
+        }
+    }
+
+    private void UpdatePlayerList()
+    {
+        if (!PhotonNetwork.InRoom || playerListText == null) return;
+
+        string playerList = "Players in Room:\n";
+        foreach (Player player in PhotonNetwork.CurrentRoom.Players.Values)
+        {
+            playerList += $"• {player.NickName}\n";
+        }
+        playerListText.text = playerList;
+
+        bool canStart = PhotonNetwork.IsMasterClient && 
+                       PhotonNetwork.CurrentRoom.PlayerCount >= MIN_PLAYERS;
+        if (startGameButton != null)
+        {
+            startGameButton.gameObject.SetActive(canStart);
+        }
+    }
+
+    private void OnBackButtonClick()
+    {
+        if (mainMenu != null)
+        {
+            mainMenu.ShowPanel(mainMenu.mainMenuPanel);
+        }
+    }
+
+    private void OnWaitingLobbyBackClick()
+    {
+        if (PhotonNetwork.InRoom)
+        {
+            PhotonNetwork.LeaveRoom();
+        }
+        if (mainMenu != null)
+        {
+            mainMenu.ShowPanel(mainMenu.multiplayerPanel);
+        }
+    }
+
+    #region Photon Callbacks
+
+    public override void OnConnectedToMaster()
+    {
+        Debug.Log("Connected to Master Server");
+        isReconnecting = false;
+        reconnectAttempts = 0;
+        UpdateConnectionStatus("Connected");
+        HideLoadingPanel();
+        
+        if (currentRoom != null)
+        {
+            PhotonNetwork.RejoinRoom(currentRoom.Name);
+        }
+    }
+
+    public override void OnDisconnected(DisconnectCause cause)
+    {
+        Debug.LogWarning($"Disconnected: {cause}");
+        UpdateConnectionStatus($"Disconnected: {cause}");
+        HideLoadingPanel();
+
+        if (cause != DisconnectCause.DisconnectByClientLogic)
+        {
+            HandleReconnection();
+        }
+    }
+
+   public override void OnJoinedRoom()
+{
+    currentRoom = PhotonNetwork.CurrentRoom;
+    Debug.Log("Joined Room: " + currentRoom.Name);
+    
+    if (roomCodeDisplay != null)
+    {
+        roomCodeDisplay.text = currentRoom.Name; 
+    }
+        UpdatePlayerList();
+        UpdateConnectionStatus("In Room: " + currentRoom.Name);
+        HideLoadingPanel();
+        
+        if (mainMenu != null)
+        {
+            mainMenu.ShowPanel(mainMenu.waitingLobbyPanel);
+        }
+    }
+
+    public override void OnCreateRoomFailed(short returnCode, string message)
+    {
+        ShowError($"Failed to create room: {message}");
+        HideLoadingPanel();
+    }
+
+    public override void OnJoinRoomFailed(short returnCode, string message)
+    {
+        ShowError($"Failed to join room: {message}");
+        HideLoadingPanel();
+    }
+
+    public override void OnPlayerEnteredRoom(Player newPlayer)
+    {
+        UpdatePlayerList();
+        Debug.Log($"{newPlayer.NickName} joined the room");
+    }
+
+    public override void OnPlayerLeftRoom(Player otherPlayer)
+    {
+        UpdatePlayerList();
+        Debug.Log($"{otherPlayer.NickName} left the room");
+    }
+
+    #endregion
+
+    private void OnDestroy()
+    {
+        if (keepAliveCoroutine != null) StopCoroutine(keepAliveCoroutine);
+        if (connectionTimeoutCoroutine != null) StopCoroutine(connectionTimeoutCoroutine);
+        if (loadingSpinnerCoroutine != null) StopCoroutine(loadingSpinnerCoroutine);
+        CancelInvoke();
+    }
+
+    private void SetInitialUIState()
+    {
+        if (connectionStatusPanel != null) connectionStatusPanel.SetActive(false);
+        if (errorPanel != null) errorPanel.SetActive(false);
+        if (loadingPanel != null) loadingPanel.SetActive(false);
+        UpdateConnectionStatus("Connecting...");
+    }
+}

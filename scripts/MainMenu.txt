@@ -1,0 +1,472 @@
+using UnityEngine;
+using TMPro;
+using Photon.Pun;
+using UnityEngine.UI;
+using DG.Tweening;
+using UnityEngine.EventSystems;
+using UnityEngine.Events;
+using UnityEngine.Video;
+using UnityEngine.SceneManagement;
+using Photon.Realtime;
+using System.Collections;
+using System.Collections.Generic;
+
+public class MainMenu : MonoBehaviourPunCallbacks
+{
+    [Header("Panels")]
+    public GameObject mainMenuPanel;
+    public GameObject multiplayerPanel;
+    public GameObject waitingLobbyPanel;
+    public GameObject quickPlayPanel;
+    public GameObject videoPanel;
+
+    [Header("Main Menu UI")]
+    public TMP_InputField usernameInput;
+    public Button battleButton;
+    public Button quickPlayButton;
+    public Button questionButton;
+    public Button shopButton;
+    public TMP_Text totalScoreText;
+
+    [Header("Multiplayer UI")]
+    public TMP_InputField roomCodeInput;
+    public Button createRoomButton;
+    public Button joinRoomButton;
+    public Button backButton;
+
+    [Header("Waiting Lobby UI")]
+    public TMP_Text roomCodeText;
+    public TMP_Text playerListText;
+    public TMP_Text waitingPlayersText;
+    public Button startGameButton;
+    public Button waitingLobbyBackButton;
+
+    [Header("Video Player")]
+    public VideoPlayer videoPlayer;
+    public RawImage videoImage;
+    public VideoClip introVideo;
+
+    [Header("Button Animation Settings")]
+    public float hoverScale = 1.2f;
+    public float hoverDuration = 0.3f;
+    public float rotationDuration = 1.5f;
+    public float punchStrength = 0.2f;
+
+    [Header("Button Sound Settings")]
+    public AudioClip hoverSound;
+    public AudioClip clickSound;
+    public AudioClip rotateSound;
+    [Range(0, 1)] public float hoverVolume = 0.5f;
+    [Range(0, 1)] public float clickVolume = 0.7f;
+    [Range(0, 1)] public float rotateVolume = 0.6f;
+
+    private AudioSource buttonAudioSource;
+    private bool isAnimating = false;
+    private bool isGoingOffline = false;
+
+    void Start()
+    {
+        PhotonNetwork.AutomaticallySyncScene = true;
+        InitializeAudio();
+        InitializeUI();
+        SetupVideoPlayer();
+        SetupAllButtons();
+    }
+
+    private void InitializeAudio()
+    {
+        if (buttonAudioSource == null)
+        {
+            buttonAudioSource = gameObject.AddComponent<AudioSource>();
+            buttonAudioSource.playOnAwake = false;
+        }
+    }
+
+    private void InitializeUI()
+    {
+        ShowPanel(mainMenuPanel);
+        
+        if (usernameInput != null)
+        {
+            usernameInput.text = PlayerPrefs.GetString("Username", "");
+        }
+
+        if (startGameButton != null)
+        {
+            startGameButton.gameObject.SetActive(false);
+        }
+
+        UpdateScoreDisplay();
+    }
+
+    private void UpdateScoreDisplay()
+    {
+        if (totalScoreText != null)
+        {
+            int totalScore = PlayerPrefs.GetInt("TotalScore", 0);
+            totalScoreText.text = $"Total Score: {totalScore}";
+        }
+    }
+
+    private void SetupVideoPlayer()
+    {
+        if (videoPlayer != null && videoImage != null && introVideo != null)
+        {
+            videoPlayer.playOnAwake = false;
+            videoPlayer.targetTexture = new RenderTexture((int)introVideo.width, (int)introVideo.height, 24);
+            videoImage.texture = videoPlayer.targetTexture;
+            videoPlayer.clip = introVideo;
+            videoPlayer.isLooping = false;
+            videoPlayer.loopPointReached += VideoPlayer_LoopPointReached;
+            videoPanel.SetActive(false);
+        }
+    }
+
+   private void SetupAllButtons()
+    {
+        Debug.Log("Setting up all buttons...");
+        SetupButtonWithAnimation(battleButton, OnBattleButtonClick);
+        SetupButtonWithAnimation(quickPlayButton, OnQuickPlayButtonClick);
+        SetupButtonWithAnimation(questionButton, OnQuestionButtonClick);
+        SetupButtonWithAnimation(shopButton, OnShopButtonClick);  // Add this
+        SetupButtonWithAnimation(createRoomButton, OnCreateRoomClick);
+        SetupButtonWithAnimation(joinRoomButton, OnJoinRoomClick);
+        SetupButtonWithAnimation(backButton, OnBackButtonClick);
+        SetupButtonWithAnimation(waitingLobbyBackButton, OnBackButtonClick);
+        SetupButtonWithAnimation(startGameButton, OnStartGameClick);
+    }
+
+    public void SetupButtonWithAnimation(Button button, UnityAction action)
+    {
+        if (button == null) return;
+
+        Vector3 originalScale = button.transform.localScale;
+        EventTrigger existingTrigger = button.gameObject.GetComponent<EventTrigger>();
+        if (existingTrigger != null)
+        {
+            Destroy(existingTrigger);
+        }
+
+        EventTrigger trigger = button.gameObject.AddComponent<EventTrigger>();
+        trigger.triggers = new List<EventTrigger.Entry>();
+
+        EventTrigger.Entry enterEntry = new EventTrigger.Entry();
+        enterEntry.eventID = EventTriggerType.PointerEnter;
+        enterEntry.callback.AddListener((eventData) => {
+            if (!button.interactable) return;
+            DOTween.Kill(button.transform);
+            button.transform.DOScale(originalScale * hoverScale, hoverDuration)
+                .SetEase(Ease.OutBack);
+            PlaySound(hoverSound, hoverVolume);
+        });
+        trigger.triggers.Add(enterEntry);
+
+       
+        EventTrigger.Entry exitEntry = new EventTrigger.Entry();
+        exitEntry.eventID = EventTriggerType.PointerExit;
+        exitEntry.callback.AddListener((eventData) => {
+            if (!button.interactable) return;
+            DOTween.Kill(button.transform);
+            button.transform.DOScale(originalScale, hoverDuration)
+                .SetEase(Ease.OutBack);
+        });
+        trigger.triggers.Add(exitEntry);
+
+     
+        button.onClick.RemoveAllListeners();
+        button.onClick.AddListener(() => {
+            if (!button.interactable || isAnimating) return;
+            
+            isAnimating = true;
+            PlaySound(clickSound, clickVolume);
+
+            Sequence sequence = DOTween.Sequence();
+            sequence.Append(button.transform.DOPunchScale(Vector3.one * punchStrength, 0.1f));
+            sequence.AppendCallback(() => PlaySound(rotateSound, rotateVolume));
+            sequence.Append(button.transform.DORotate(new Vector3(0, 360, 0), rotationDuration, RotateMode.LocalAxisAdd)
+                .SetEase(Ease.InOutQuad));
+            
+            sequence.OnComplete(() => {
+                button.transform.rotation = Quaternion.identity;
+                button.transform.localScale = originalScale;
+                isAnimating = false;
+                action?.Invoke();
+            });
+        });
+    }
+
+    private void PlaySound(AudioClip clip, float volume)
+    {
+        if (clip != null && buttonAudioSource != null)
+        {
+            buttonAudioSource.PlayOneShot(clip, volume);
+        }
+    }
+
+    public void OnQuestionButtonClick()
+    {
+        if (string.IsNullOrEmpty(usernameInput.text))
+        {
+            Debug.LogWarning("Please enter a username!");
+            return;
+        }
+
+        PlayerPrefs.SetString("Username", usernameInput.text);
+        SceneManager.LoadScene("Question");
+    }
+    public void OnShopButtonClick()
+    {
+        if (string.IsNullOrEmpty(usernameInput.text))
+        {
+            Debug.LogWarning("Please enter a username!");
+            return;
+        }
+
+        PlayerPrefs.SetString("Username", usernameInput.text);
+        SceneManager.LoadScene("Shop");
+    }
+
+    public void OnQuickPlayButtonClick()
+    {
+        if (string.IsNullOrEmpty(usernameInput.text))
+        {
+            Debug.LogWarning("Please enter a username!");
+            return;
+        }
+        
+        PlayerPrefs.SetString("Username", usernameInput.text);
+        PhotonNetwork.NickName = usernameInput.text;
+
+        ShowPanel(waitingLobbyPanel);
+        if (waitingPlayersText != null)
+        {
+            waitingPlayersText.text = "Searching for players...";
+        }
+
+        PhotonNetwork.JoinRandomRoom(
+            new ExitGames.Client.Photon.Hashtable() { { "isQuickPlay", true } },
+            4
+        );
+    }
+
+    public void OnBattleButtonClick()
+    {
+        if (string.IsNullOrEmpty(usernameInput.text))
+        {
+            Debug.LogWarning("Please enter a username!");
+            return;
+        }
+
+        PlayerPrefs.SetString("Username", usernameInput.text);
+        PhotonNetwork.NickName = usernameInput.text;
+        ShowPanel(multiplayerPanel);
+
+        if (!PhotonNetwork.IsConnected)
+        {
+            PhotonNetwork.ConnectUsingSettings();
+        }
+    }
+
+    public void OnCreateRoomClick()
+    {
+        if (!PhotonNetwork.IsConnected)
+        {
+            Debug.LogWarning("Not connected to Photon Network!");
+            return;
+        }
+
+        string roomCode = Random.Range(1000, 9999).ToString();
+        RoomOptions options = new RoomOptions 
+        { 
+            MaxPlayers = 4,
+            IsVisible = true,
+            IsOpen = true
+        };
+        PhotonNetwork.CreateRoom(roomCode, options);
+    }
+
+    public void OnJoinRoomClick()
+    {
+        if (string.IsNullOrEmpty(roomCodeInput.text))
+        {
+            Debug.LogWarning("Please enter a room code!");
+            return;
+        }
+
+        PhotonNetwork.JoinRoom(roomCodeInput.text);
+    }
+
+    public void OnBackButtonClick()
+    {
+        if (PhotonNetwork.InRoom)
+        {
+            PhotonNetwork.LeaveRoom();
+        }
+        ShowPanel(mainMenuPanel);
+        UpdateScoreDisplay(); 
+    }
+
+    public void OnStartGameClick()
+    {
+        if (PhotonNetwork.IsMasterClient && PhotonNetwork.CurrentRoom.PlayerCount >= 2)
+        {
+            PhotonNetwork.CurrentRoom.IsOpen = false;
+            PhotonNetwork.LoadLevel("BattleScene");
+        }
+    }
+
+    public void ShowPanel(GameObject panelToShow)
+    {
+        mainMenuPanel?.SetActive(panelToShow == mainMenuPanel);
+        multiplayerPanel?.SetActive(panelToShow == multiplayerPanel);
+        waitingLobbyPanel?.SetActive(panelToShow == waitingLobbyPanel);
+        quickPlayPanel?.SetActive(panelToShow == quickPlayPanel);
+        videoPanel?.SetActive(panelToShow == videoPanel);
+
+       
+        if (panelToShow == mainMenuPanel)
+        {
+            UpdateScoreDisplay();
+        }
+    }
+
+    private void UpdatePlayerList()
+    {
+        if (!PhotonNetwork.InRoom || playerListText == null) return;
+
+        string playerList = "Players in Room:\n";
+        foreach (Player player in PhotonNetwork.CurrentRoom.Players.Values)
+        {
+            playerList += $"• {player.NickName}\n";
+        }
+        playerListText.text = playerList;
+
+        if (PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey("isQuickPlay"))
+        {
+            if (PhotonNetwork.IsMasterClient)
+            {
+                bool canStart = PhotonNetwork.CurrentRoom.PlayerCount >= 2 && 
+                               PhotonNetwork.CurrentRoom.PlayerCount <= 4;
+                if (canStart)
+                {
+                    PhotonNetwork.CurrentRoom.IsOpen = false;
+                    PhotonNetwork.LoadLevel("BattleScene");
+                }
+            }
+            
+            if (waitingPlayersText != null)
+            {
+                int playersNeeded = 2 - PhotonNetwork.CurrentRoom.PlayerCount;
+                waitingPlayersText.text = playersNeeded > 0 ? 
+                    $"Waiting for {playersNeeded} more player{(playersNeeded > 1 ? "s" : "")}..." :
+                    "Starting game...";
+            }
+        }
+        else
+        {
+            if (startGameButton != null)
+            {
+                startGameButton.gameObject.SetActive(PhotonNetwork.IsMasterClient && 
+                                                   PhotonNetwork.CurrentRoom.PlayerCount >= 2);
+            }
+        }
+    }
+
+    #region Photon Callbacks
+    public override void OnConnectedToMaster()
+    {
+        Debug.Log("Connected to Master Server");
+    }
+
+    public override void OnJoinedRoom()
+    {
+        Debug.Log($"Joined Room: {PhotonNetwork.CurrentRoom.Name}");
+        ShowPanel(waitingLobbyPanel);
+        if (roomCodeText != null)
+        {
+            roomCodeText.text = $" {PhotonNetwork.CurrentRoom.Name}";
+        }
+        UpdatePlayerList();
+        UpdateScoreDisplay();
+    }
+
+    public override void OnPlayerEnteredRoom(Player newPlayer)
+    {
+        UpdatePlayerList();
+    }
+
+    public override void OnPlayerLeftRoom(Player otherPlayer)
+    {
+        UpdatePlayerList();
+    }
+
+    public override void OnJoinRandomFailed(short returnCode, string message)
+    {
+        Debug.Log("No quick play room found. Creating new one.");
+        
+        string roomName = "QuickPlay_" + Random.Range(0, 10000);
+        RoomOptions options = new RoomOptions
+        {
+            MaxPlayers = 4,
+            IsVisible = true,
+            IsOpen = true,
+            CustomRoomProperties = new ExitGames.Client.Photon.Hashtable { { "isQuickPlay", true } }
+        };
+        
+        PhotonNetwork.CreateRoom(roomName, options);
+    }
+
+    public override void OnCreateRoomFailed(short returnCode, string message)
+    {
+        Debug.LogError($"Room creation failed: {message}");
+    }
+
+    public override void OnJoinRoomFailed(short returnCode, string message)
+    {
+        Debug.LogError($"Failed to join room: {message}");
+    }
+
+    public override void OnDisconnected(DisconnectCause cause)
+    {
+        Debug.Log($"Disconnected: {cause}");
+        if (!isGoingOffline)
+        {
+            ShowPanel(mainMenuPanel);
+        }
+    }
+    #endregion
+
+    private void ResetAllButtons()
+    {
+        Button[] allButtons = GetComponentsInChildren<Button>(true);
+        foreach (Button button in allButtons)
+        {
+            if (button != null)
+            {
+                button.transform.rotation = Quaternion.identity;
+                button.transform.localScale = Vector3.one;
+            }
+        }
+    }
+
+    void OnDisable()
+    {
+        DOTween.KillAll();
+        ResetAllButtons();
+        isAnimating = false;
+    }
+
+    void OnDestroy()
+    {
+        if (videoPlayer != null)
+        {
+            videoPlayer.loopPointReached -= VideoPlayer_LoopPointReached;
+        }
+        DOTween.KillAll();
+    }
+
+    private void VideoPlayer_LoopPointReached(VideoPlayer source)
+    {
+      
+    }
+}
