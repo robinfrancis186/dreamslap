@@ -1,17 +1,16 @@
-# Slap Royale
+# Dream Slap
 
-A multiplayer battle royale game built with Unity where players engage in epic slapping battles!
+A multiplayer battle game built with Unity where players engage in epic slapping battles!
 
 ## Description
 
-Slap Royale is an exciting multiplayer game where players compete in a battle royale format with a unique twist - instead of traditional weapons, players use slaps to eliminate their opponents. The last player standing wins!
+Dream Slap is an exciting multiplayer game where players compete in a battle format with a unique twist - instead of traditional weapons, players use slaps to eliminate their opponents. The last player standing wins!
 
 ## Features
 
 - Multiplayer battle royale gameplay
 - Real-time slapping mechanics
 - Multiple character options
-- Various arenas to battle in
 - Photon networking integration for smooth multiplayer experience
 
 ## System Requirements
