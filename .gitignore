@@ -1,6 +1,6 @@
 # Documentation files
-documentation and presentation/
 *.pdf
+!documentation and presentation/*.pdf
 
 # Unity generated
 [Ll]ibrary/
